@@ -1,21 +1,9 @@
-name: ci
-
-on:
-  push: {}
-
-concurrency:
-  group: deploy-${{ github.ref }}
-  cancel-in-progress: true
+name: build-and-deploy
+on: [push]
 
 permissions:
-  id-token: write        # required for OIDC
+  id-token: write
   contents: read
-
-env:
-  REGION: us-central1
-  PROJECT_ID: single-clock-473907-p6
-  AR_REPO: apps
-  IMAGE_NAME: hello-gke
 
 jobs:
   build-and-deploy:
@@ -23,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Auth to Google Cloud (OIDC)
+      - name: Authenticate to Google Cloud via OIDC
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
@@ -33,28 +21,16 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Configure Docker for Artifact Registry
-        run: |
-          gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
+        run: gcloud auth configure-docker --quiet
 
-      - name: Build & Push image
+      - name: Build & push image
         run: |
-          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$AR_REPO/$IMAGE_NAME:${GITHUB_SHA::7}"
+          IMAGE="us-central1-docker.pkg.dev/single-clock-473907-p6/apps/hello:${{ github.sha }}"
           docker build -t "$IMAGE" ./app
           docker push "$IMAGE"
-          echo "IMAGE_URI=$IMAGE" >> $GITHUB_ENV
 
       - name: Get GKE credentials
-        run: |
-          gcloud container clusters get-credentials autopilot-lab --region "$REGION" --project "$PROJECT_ID"
-          kubectl cluster-info
+        run: gcloud container clusters get-credentials autopilot-lab --region us-central1 --project single-clock-473907-p6
 
-      - name: Render manifests (swap registry) and apply
-        run: |
-          REGISTRY_PREFIX="$REGION-docker.pkg.dev/$PROJECT_ID/$AR_REPO"
-          sed "s|REGISTRY_PLACEHOLDER|$REGISTRY_PREFIX|g" k8s/deployment.yaml | \
-          sed "s|:latest|:${GITHUB_SHA::7}|g" > k8s/deployment.rendered.yaml
-          kubectl apply -f k8s/deployment.rendered.yaml
-          kubectl apply -f k8s/service.yaml
-
-      - name: Show service EXTERNAL-IP (may take 1-3 min)
-        run: kubectl get svc hello -o wide
+      - name: Deploy manifests
+        run: kubectl apply -f k8s/
