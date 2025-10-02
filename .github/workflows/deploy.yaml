@@ -1,6 +1,9 @@
 name: build-and-deploy
-on: [push]
 
+on:
+  push:
+
+# 👇 These permissions are required for OIDC auth to GCP
 permissions:
   id-token: write
   contents: read
@@ -11,26 +14,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Debug context (optional but recommended)
+      - name: Print GitHub repo context
+        run: |
+          echo "GITHUB_REPOSITORY=${GITHUB_REPOSITORY}"
+          echo "GITHUB_REF=${GITHUB_REF}"
+
+      # Authenticate to Google Cloud using Workload Identity Federation
       - name: Authenticate to Google Cloud via OIDC
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           service_account: ${{ secrets.GCP_DEPLOYER_SA }}
 
+      # Setup gcloud CLI
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
 
+      # Configure Docker for Artifact Registry
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker --quiet
 
+      # Build & push image
       - name: Build & push image
         run: |
           IMAGE="us-central1-docker.pkg.dev/single-clock-473907-p6/apps/hello:${{ github.sha }}"
           docker build -t "$IMAGE" ./app
           docker push "$IMAGE"
 
+      # Get GKE credentials
       - name: Get GKE credentials
         run: gcloud container clusters get-credentials autopilot-lab --region us-central1 --project single-clock-473907-p6
 
+      # Deploy Kubernetes manifests
       - name: Deploy manifests
         run: kubectl apply -f k8s/
